@@ -89,7 +89,7 @@ fun ImportScreen(
         recognizer.process(image)
             .addOnSuccessListener { result ->
                 isReading = false
-                processText(result.text)
+                rawText = result.text\n                parsed = parseScheduleOcr(result, employeeName)\n                status = if (parsed.isEmpty()) {\n                    if (employeeName.isBlank()) \"Texto lido. Informe exatamente seu nome na escala e escolha a imagem novamente.\" else \"Não consegui relacionar seu nome aos dias. Nenhuma data foi inventada; tente uma imagem mais nítida.\"\n                } else {\n                    parsed.size.toString() + \" dias identificados. Confira antes de salvar.\"\n                }
                 recognizer.close()
             }
             .addOnFailureListener {
@@ -239,7 +239,7 @@ fun ImportScreen(
                     .height(56.dp),
                 shape = RoundedCornerShape(18.dp)
             ) {
-                Text("SALVAR " + parsed.size + " ITENS NO CALENDÁRIO", fontWeight = FontWeight.Black)
+                Text("SALVAR NO CALENDÁRIO", fontWeight = FontWeight.Black, fontSize = 13.sp, maxLines = 1)
             }
         }
 
