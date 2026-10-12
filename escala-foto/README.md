@@ -27,5 +27,5 @@ Primeira versão funcional do projeto de calendário de trabalho por foto.
 
 > Nome e identidade visual ainda são provisórios. O foco desta fase é provar que a importação por imagem funciona de verdade.
 
-## Estado da build
+## Estado da build v0.2
 Workflow preparado para gerar o APK debug automaticamente a cada atualização do protótipo.
