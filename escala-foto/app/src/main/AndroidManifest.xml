@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="true"
-        android:label="Escala Foto"
+        android:label="Escala Foto"\n        android:icon="@drawable/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.EscalaFoto">
         <activity
