@@ -1,100 +1,174 @@
 package com.pc2zinho.escalafoto
 
+import android.graphics.Rect
+import com.google.mlkit.vision.text.Text
+import java.text.Normalizer
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.temporal.ChronoUnit
 
-private val dateRegex = Regex("""\b([0-3]?\d)[/.\-]([01]?\d)(?:[/.\-](\d{2,4}))?\b""")
-private val rangeRegex = Regex(
-    """\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(?:h)?\s*(?:-|–|—|às|as|a)\s*([01]?\d|2[0-3])(?::([0-5]\d))?\s*(?:h)?\b""",
-    RegexOption.IGNORE_CASE
-)
-private val offRegex = Regex("""\b(folga|off|descanso)\b""", RegexOption.IGNORE_CASE)
+data class OcrCell(val text: String, val box: Rect)
 
-fun parseScheduleText(text: String, employeeName: String = ""): List<Shift> {
-    val lines = text.lines()
-        .map { it.replace("\t", " ").replace(Regex("""\s+"""), " ").trim() }
-        .filter { it.isNotBlank() }
+private val periodRegex = Regex("""(?i)PER[IÍ]ODO\s*:?\s*([0-3]?\d)[/.-]([01]?\d)[/.-](\d{2,4})\s*(?:A|À|ATE|ATÉ|-|–)\s*([0-3]?\d)[/.-]([01]?\d)[/.-](\d{2,4})""")
+private val fullDateRegex = Regex("""\b([0-3]?\d)[/.-]([01]?\d)[/.-](\d{2,4})\b""")
+private val timeRangeRegex = Regex("""(?i)\b([01]?\d|2[0-3])(?::([0-5]\d))?\s*(?:h)?\s*(?:-|–|—|AS|ÀS|A)\s*([01]?\d|2[0-3])(?::([0-5]\d))?\s*(?:h)?\b""")
+private val offWordRegex = Regex("""(?i)\b(FOLGA|OFF|DESCANSO)\b""")
+
+fun extractOcrCells(result: Text): List<OcrCell> =
+    result.textBlocks.flatMap { block ->
+        block.lines.flatMap { line ->
+            line.elements.mapNotNull { element ->
+                element.boundingBox?.let { OcrCell(element.text.trim(), it) }
+            }
+        }
+    }.filter { it.text.isNotBlank() }
+
+fun parseScheduleOcr(result: Text, employeeName: String): List<Shift> {
+    val cells = extractOcrCells(result)
+    val fullText = result.text
+    val period = detectPeriod(fullText)
+    if (period != null && employeeName.isNotBlank()) {
+        val geometric = parseGridByGeometry(cells, employeeName, period.first, period.second)
+        if (geometric.isNotEmpty()) return geometric
+    }
+    return parseScheduleText(fullText, employeeName, period?.first?.year)
+}
+
+private fun parseGridByGeometry(
+    cells: List<OcrCell>,
+    employeeName: String,
+    startDate: LocalDate,
+    endDate: LocalDate
+): List<Shift> {
+    val normalizedName = normalize(employeeName)
+    val nameCells = cells.filter {
+        val n = normalize(it.text)
+        n.contains(normalizedName) || normalizedName.contains(n)
+    }
+    if (nameCells.isEmpty()) return emptyList()
+
+    val anchor = nameCells.maxByOrNull { normalize(it.text).length } ?: return emptyList()
+    val rowHeight = anchor.box.height().coerceAtLeast(18)
+    val rowCenter = anchor.box.centerY()
+    val row = cells.filter {
+        kotlin.math.abs(it.box.centerY() - rowCenter) <= rowHeight * 0.85 &&
+            it.box.left > anchor.box.right - 4
+    }.sortedBy { it.box.centerX() }
+
+    if (row.isEmpty()) return emptyList()
+
+    val tokens = mutableListOf<Pair<Int, ShiftToken>>()
+    val joined = row.joinToString(" ") { it.text }
+    timeRangeRegex.findAll(joined).forEach { m ->
+        val matchText = m.value
+        val matchingCell = row.firstOrNull { normalize(it.text).contains(normalize(matchText)) }
+        val x = matchingCell?.box?.centerX() ?: Int.MAX_VALUE
+        tokens += x to ShiftToken(
+            start = parseTime(m.groupValues[1], m.groupValues[2]),
+            end = parseTime(m.groupValues[3], m.groupValues[4]),
+            off = false
+        )
+    }
+
+    row.forEach { cell ->
+        if (offWordRegex.containsMatchIn(cell.text)) {
+            tokens += cell.box.centerX() to ShiftToken(null, null, true)
+        } else {
+            val m = timeRangeRegex.find(cell.text)
+            if (m != null) {
+                tokens += cell.box.centerX() to ShiftToken(
+                    parseTime(m.groupValues[1], m.groupValues[2]),
+                    parseTime(m.groupValues[3], m.groupValues[4]),
+                    false
+                )
+            }
+        }
+    }
+
+    val ordered = tokens.distinctBy { it.first to it.second }.sortedBy { it.first }.map { it.second }
+    val dates = generateSequence(startDate) { it.plusDays(1) }.takeWhile { !it.isAfter(endDate) }.toList()
+
+    if (ordered.size < 2 || dates.isEmpty()) return emptyList()
+    return dates.zip(ordered).map { (date, token) ->
+        Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
+    }
+}
+
+private data class ShiftToken(val start: LocalTime?, val end: LocalTime?, val off: Boolean)
+
+fun parseScheduleText(text: String, employeeName: String = "", preferredYear: Int? = null): List<Shift> {
+    val period = detectPeriod(text)
+    val year = period?.first?.year ?: preferredYear ?: LocalDate.now().year
+    val lines = text.lines().map { it.replace(Regex("""\s+"""), " ").trim() }.filter { it.isNotBlank() }
+
+    if (period != null && employeeName.isNotBlank()) {
+        val employeeIndex = lines.indexOfFirst { normalize(it).contains(normalize(employeeName)) }
+        if (employeeIndex >= 0) {
+            val combined = buildString {
+                append(lines[employeeIndex])
+                for (i in 1..2) if (employeeIndex + i < lines.size) append(" ").append(lines[employeeIndex + i])
+            }
+            val tokens = extractTokens(combined)
+            val dates = generateSequence(period.first) { it.plusDays(1) }.takeWhile { !it.isAfter(period.second) }.toList()
+            if (tokens.size >= 2) {
+                return dates.zip(tokens).map { (date, token) ->
+                    Shift(date, token.start, token.end, token.off)
+                }
+            }
+        }
+    }
 
     val direct = mutableListOf<Shift>()
-
     lines.forEach { line ->
-        val dates = dateRegex.findAll(line).toList()
-        if (dates.size != 1) return@forEach
-        val date = dateFrom(dates.first()) ?: return@forEach
-        val range = rangeRegex.find(line)
+        val dateMatch = fullDateRegex.find(line) ?: return@forEach
+        val date = fullDate(dateMatch) ?: return@forEach
+        val range = timeRangeRegex.find(line)
         when {
-            range != null -> direct += Shift(date = date, start = timeFrom(range, 1, 2), end = timeFrom(range, 3, 4))
-            offRegex.containsMatchIn(line) -> direct += Shift(date = date, dayOff = true)
+            range != null -> direct += Shift(date, parseTime(range.groupValues[1], range.groupValues[2]), parseTime(range.groupValues[3], range.groupValues[4]))
+            offWordRegex.containsMatchIn(line) -> direct += Shift(date, dayOff = true)
         }
     }
+    if (direct.isNotEmpty()) return direct.distinctBy { it.date to it.start }.sortedBy { it.date }
 
-    if (direct.isNotEmpty()) return direct.distinctSchedule().sortedBy { it.date }
-
-    val headerIndex = lines.indexOfFirst { dateRegex.findAll(it).count() >= 2 }
-    if (headerIndex >= 0) {
-        val headerDates = dateRegex.findAll(lines[headerIndex]).mapNotNull(::dateFrom).toList()
-        val row = when {
-            employeeName.isNotBlank() -> lines.drop(headerIndex + 1)
-                .firstOrNull { it.contains(employeeName, ignoreCase = true) }
-            else -> lines.drop(headerIndex + 1).firstOrNull {
-                rangeRegex.containsMatchIn(it) || offRegex.containsMatchIn(it)
-            }
-        }
-
-        if (row != null && headerDates.isNotEmpty()) {
-            data class Token(val index: Int, val start: LocalTime?, val end: LocalTime?, val off: Boolean)
-            val tokens = mutableListOf<Token>()
-
-            rangeRegex.findAll(row).forEach {
-                tokens += Token(it.range.first, timeFrom(it, 1, 2), timeFrom(it, 3, 4), false)
-            }
-            offRegex.findAll(row).forEach {
-                tokens += Token(it.range.first, null, null, true)
-            }
-
-            val ordered = tokens.sortedBy { it.index }
-            val tableResult = headerDates.zip(ordered).map { (date, token) ->
-                Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
-            }
-            if (tableResult.isNotEmpty()) return tableResult.distinctSchedule().sortedBy { it.date }
-        }
-    }
-
-    val allDates = dateRegex.findAll(text).mapNotNull(::dateFrom).toList()
-    val allRanges = rangeRegex.findAll(text).toList()
-    if (allDates.size == allRanges.size && allDates.isNotEmpty()) {
-        return allDates.zip(allRanges).map { (date, range) ->
-            Shift(date = date, start = timeFrom(range, 1, 2), end = timeFrom(range, 3, 4))
-        }.distinctSchedule().sortedBy { it.date }
-    }
-
+    // Never invent a date from an isolated time such as 19-07.
+    // Without a detected period/full date, return nothing and require review.
     return emptyList()
 }
 
-private fun dateFrom(match: MatchResult): LocalDate? {
-    val day = match.groupValues[1].toIntOrNull() ?: return null
-    val month = match.groupValues[2].toIntOrNull() ?: return null
-    val rawYear = match.groupValues.getOrNull(3).orEmpty()
-    val now = LocalDate.now()
-    var year = when {
-        rawYear.isBlank() -> now.year
-        rawYear.length == 2 -> 2000 + (rawYear.toIntOrNull() ?: return null)
-        else -> rawYear.toIntOrNull() ?: return null
+private fun extractTokens(text: String): List<ShiftToken> {
+    data class Positioned(val pos: Int, val token: ShiftToken)
+    val found = mutableListOf<Positioned>()
+    timeRangeRegex.findAll(text).forEach { m ->
+        found += Positioned(m.range.first, ShiftToken(
+            parseTime(m.groupValues[1], m.groupValues[2]),
+            parseTime(m.groupValues[3], m.groupValues[4]),
+            false
+        ))
     }
-    var date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return null
-    if (rawYear.isBlank() && ChronoUnit.DAYS.between(date, now) > 180) {
-        year += 1
-        date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: date
-    }
-    return date
+    offWordRegex.findAll(text).forEach { m -> found += Positioned(m.range.first, ShiftToken(null, null, true)) }
+    return found.sortedBy { it.pos }.map { it.token }
 }
 
-private fun timeFrom(match: MatchResult, hourIndex: Int, minuteIndex: Int): LocalTime {
-    val hour = match.groupValues[hourIndex].toInt()
-    val minute = match.groupValues[minuteIndex].toIntOrNull() ?: 0
-    return LocalTime.of(hour, minute)
+private fun detectPeriod(text: String): Pair<LocalDate, LocalDate>? {
+    val match = periodRegex.find(text) ?: return null
+    val start = makeDate(match.groupValues[1], match.groupValues[2], match.groupValues[3]) ?: return null
+    val end = makeDate(match.groupValues[4], match.groupValues[5], match.groupValues[6]) ?: return null
+    return if (!end.isBefore(start) && end.toEpochDay() - start.toEpochDay() <= 62) start to end else null
 }
 
-private fun List<Shift>.distinctSchedule(): List<Shift> =
-    distinctBy { listOf(it.date, it.start, it.end, it.dayOff) }
+private fun fullDate(match: MatchResult): LocalDate? =
+    makeDate(match.groupValues[1], match.groupValues[2], match.groupValues[3])
+
+private fun makeDate(day: String, month: String, year: String): LocalDate? {
+    val y = year.toIntOrNull()?.let { if (year.length == 2) 2000 + it else it } ?: return null
+    return runCatching { LocalDate.of(y, month.toInt(), day.toInt()) }.getOrNull()
+}
+
+private fun parseTime(hour: String, minute: String): LocalTime =
+    LocalTime.of(hour.toInt(), minute.toIntOrNull() ?: 0)
+
+private fun normalize(value: String): String =
+    Normalizer.normalize(value.uppercase(), Normalizer.Form.NFD)
+        .replace(Regex("""\p{Mn}+"""), "")
+        .replace(Regex("""[^A-Z0-9 ]"""), "")
+        .replace(Regex("""\s+"""), " ")
+        .trim()
