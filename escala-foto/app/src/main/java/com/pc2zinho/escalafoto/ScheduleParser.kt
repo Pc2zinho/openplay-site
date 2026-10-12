@@ -111,7 +111,7 @@ fun parseScheduleText(text: String, employeeName: String = "", preferredYear: In
             val dates = generateSequence(period.first) { it.plusDays(1) }.takeWhile { !it.isAfter(period.second) }.toList()
             if (tokens.size >= 2) {
                 return dates.zip(tokens).map { (date, token) ->
-                    Shift(date, token.start, token.end, token.off)
+                    Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
                 }
             }
         }
@@ -123,8 +123,8 @@ fun parseScheduleText(text: String, employeeName: String = "", preferredYear: In
         val date = fullDate(dateMatch) ?: return@forEach
         val range = timeRangeRegex.find(line)
         when {
-            range != null -> direct += Shift(date, parseTime(range.groupValues[1], range.groupValues[2]), parseTime(range.groupValues[3], range.groupValues[4]))
-            offWordRegex.containsMatchIn(line) -> direct += Shift(date, dayOff = true)
+            range != null -> direct += Shift(date = date, start = parseTime(range.groupValues[1], range.groupValues[2]), end = parseTime(range.groupValues[3], range.groupValues[4]))
+            offWordRegex.containsMatchIn(line) -> direct += Shift(date = date, dayOff = true)
         }
     }
     if (direct.isNotEmpty()) return direct.distinctBy { it.date to it.start }.sortedBy { it.date }
