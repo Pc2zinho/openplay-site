@@ -89,7 +89,14 @@ fun ImportScreen(
         recognizer.process(image)
             .addOnSuccessListener { result ->
                 isReading = false
-                rawText = result.text\n                parsed = parseScheduleOcr(result, employeeName)\n                status = if (parsed.isEmpty()) {\n                    if (employeeName.isBlank()) \"Texto lido. Informe exatamente seu nome na escala e escolha a imagem novamente.\" else \"Não consegui relacionar seu nome aos dias. Nenhuma data foi inventada; tente uma imagem mais nítida.\"\n                } else {\n                    parsed.size.toString() + \" dias identificados. Confira antes de salvar.\"\n                }
+                rawText = result.text
+                parsed = parseScheduleOcr(result, employeeName)
+                status = if (parsed.isEmpty()) {
+                    if (employeeName.isBlank()) "Texto lido. Informe exatamente seu nome na escala e escolha a imagem novamente."
+                    else "Não consegui relacionar seu nome aos dias. Nenhuma data foi inventada; tente uma imagem mais nítida."
+                } else {
+                    parsed.size.toString() + " dias identificados. Confira antes de salvar."
+                }
                 recognizer.close()
             }
             .addOnFailureListener {
