@@ -27,8 +27,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.ui.platform.LocalContext
-import android.content.Intent
+import android.Manifest
+import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.provider.CalendarContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import java.time.ZoneId
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -57,6 +62,12 @@ fun CalendarScreen(
 ) {
     val context = LocalContext.current
     var month by remember { mutableStateOf(YearMonth.now()) }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+    fun exportMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }) }
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        if (grants[Manifest.permission.READ_CALENDAR] == true && grants[Manifest.permission.WRITE_CALENDAR] == true) exportMonth()
+        else exportMessage = "Permissão do calendário necessária para adicionar todos os plantões."
+    }
     val today = LocalDate.now()
     val firstDay = month.atDay(1)
     val offset = firstDay.dayOfWeek.value - 1
@@ -172,28 +183,19 @@ fun CalendarScreen(
         if (monthShifts.isNotEmpty()) {
             Button(
                 onClick = {
-                    val work = monthShifts.filter { !it.dayOff && it.start != null && it.end != null }
-                    if (work.isNotEmpty()) {
-                        val first = work.first()
-                        val startMillis = first.date.atTime(first.start).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                        var endDate = first.date
-                        if (!first.end!!.isAfter(first.start)) endDate = endDate.plusDays(1)
-                        val endMillis = endDate.atTime(first.end).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                        val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
-                            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis)
-                            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMillis)
-                            .putExtra(CalendarContract.Events.TITLE, "Plantão")
-                            .putExtra(CalendarContract.Events.DESCRIPTION, "Escala importada pelo Escala Foto")
-                        context.startActivity(intent)
-                    }
+                    val readOk = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+                    val writeOk = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+                    if (readOk && writeOk) exportMonth()
+                    else calendarPermissionLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A765))
             ) {
                 Icon(Icons.Filled.EventAvailable, contentDescription = null)
-                Text("  ADICIONAR PLANTÃO AO CALENDÁRIO DO CELULAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("  ADICIONAR TODOS AO CALENDÁRIO DO CELULAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
+            exportMessage?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
             Spacer(Modifier.height(10.dp))
             Text(
                 text = monthShifts.count { !it.dayOff }.toString() + " plantões • " +
@@ -202,5 +204,47 @@ fun CalendarScreen(
                 fontSize = 12.sp
             )
         }
+    }
+}
+
+private fun exportWorkShiftsToDeviceCalendar(context: android.content.Context, shifts: List<Shift>): String {
+    val work = shifts.filter { !it.dayOff && it.start != null && it.end != null }.sortedBy { it.date }
+    if (work.isEmpty()) return "Nenhum plantão deste mês para exportar."
+    val resolver = context.contentResolver
+    val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.IS_PRIMARY, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
+    val selection = CalendarContract.Calendars.VISIBLE + "=1 AND " + CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL + ">=?"
+    val calendarId = resolver.query(CalendarContract.Calendars.CONTENT_URI, projection, selection,
+        arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString()), CalendarContract.Calendars.IS_PRIMARY + " DESC"
+    )?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        ?: return "Não encontrei um calendário gravável no aparelho."
+    var added = 0
+    var skipped = 0
+    val zone = ZoneId.systemDefault()
+    work.forEach { shift ->
+        val start = shift.date.atTime(shift.start).atZone(zone).toInstant().toEpochMilli()
+        var endDate = shift.date
+        if (!shift.end!!.isAfter(shift.start)) endDate = endDate.plusDays(1)
+        val end = endDate.atTime(shift.end).atZone(zone).toInstant().toEpochMilli()
+        val duplicateSelection = CalendarContract.Events.CALENDAR_ID + "=? AND " + CalendarContract.Events.DTSTART + "=? AND " + CalendarContract.Events.TITLE + "=?"
+        val duplicate = resolver.query(CalendarContract.Events.CONTENT_URI, arrayOf(CalendarContract.Events._ID),
+            duplicateSelection, arrayOf(calendarId.toString(), start.toString(), "Plantão"), null
+        )?.use { it.moveToFirst() } ?: false
+        if (duplicate) skipped++ else {
+            val values = ContentValues().apply {
+                put(CalendarContract.Events.CALENDAR_ID, calendarId)
+                put(CalendarContract.Events.TITLE, "Plantão")
+                put(CalendarContract.Events.DESCRIPTION, "Escala importada pelo Escala Foto")
+                put(CalendarContract.Events.DTSTART, start)
+                put(CalendarContract.Events.DTEND, end)
+                put(CalendarContract.Events.EVENT_TIMEZONE, zone.id)
+            }
+            if (resolver.insert(CalendarContract.Events.CONTENT_URI, values) != null) added++
+        }
+    }
+    return when {
+        added > 0 && skipped > 0 -> added.toString() + " plantões adicionados • " + skipped + " já estavam no calendário."
+        added > 0 -> added.toString() + " plantões adicionados ao calendário do celular."
+        skipped > 0 -> "Todos os plantões já estavam no calendário. Nenhum duplicado foi criado."
+        else -> "Não foi possível adicionar os plantões."
     }
 }
