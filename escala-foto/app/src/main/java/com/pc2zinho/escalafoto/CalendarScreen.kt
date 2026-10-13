@@ -225,8 +225,6 @@ fun CalendarScreen(
             )
         }
     }
-}
-
     if (showReplaceDialog) {
         AlertDialog(
             onDismissRequest = { showReplaceDialog = false },
@@ -246,6 +244,7 @@ fun CalendarScreen(
         )
     }
 }
+
 
 private fun removeEscalaFotoEventsFromDeviceCalendar(context: android.content.Context, month: YearMonth): String {
     val resolver = context.contentResolver
