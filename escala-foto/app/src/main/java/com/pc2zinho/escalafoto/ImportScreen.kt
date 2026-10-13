@@ -68,7 +68,8 @@ fun ImportScreen(
     var parsed by remember { mutableStateOf<List<Shift>>(emptyList()) }
     var editingIndex by remember { mutableIntStateOf(-1) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
-    var detectedNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var detectedRows by remember { mutableStateOf<List<EmployeeRowCandidate>>(emptyList()) }
+    var selectedRowY by remember { mutableStateOf<Int?>(null) }
     var showEmployeeDialog by remember { mutableStateOf(false) }
 
     fun processText(text: String) {
@@ -96,8 +97,8 @@ fun ImportScreen(
                 isReading = false
                 rawText = result.text
                 if (employeeName.isBlank()) {
-                    detectedNames = detectEmployeeCandidates(result).ifEmpty { detectEmployeeNames(result.text) }
-                    if (detectedNames.isNotEmpty()) {
+                    detectedRows = detectEmployeeRows(result)
+                    if (detectedRows.isNotEmpty()) {
                         pendingUri = uri
                         showEmployeeDialog = true
                         status = "Escolha sua linha para importar somente a sua escala."
@@ -105,10 +106,10 @@ fun ImportScreen(
                         return@addOnSuccessListener
                     }
                 }
-                parsed = parseScheduleOcr(result, employeeName)
+                parsed = selectedRowY?.let { parseScheduleOcrByRow(result, it) } ?: parseScheduleOcr(result, employeeName)
                 status = if (parsed.isEmpty()) {
                     if (employeeName.isBlank()) "Texto lido. Informe exatamente seu nome na escala e escolha a imagem novamente."
-                    else "Não consegui relacionar seu nome aos dias. Nenhuma data foi inventada; tente uma imagem mais nítida."
+                    else "Encontrei sua linha, mas não consegui identificar datas/horários suficientes. Confira se o período aparece na foto."
                 } else {
                     parsed.size.toString() + " dias identificados. Confira antes de salvar."
                 }
@@ -276,7 +277,7 @@ fun ImportScreen(
     }
 
 
-    if (showEmployeeDialog && detectedNames.isNotEmpty()) {
+    if (showEmployeeDialog && detectedRows.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { showEmployeeDialog = false },
             title = { Text("Quem é você nesta escala?") },
@@ -284,15 +285,16 @@ fun ImportScreen(
                 Column {
                     Text("Encontramos estas linhas de funcionários. Toque na sua. Se o nome saiu estranho no OCR, escolha pela posição/texto mais parecido:")
                     Spacer(Modifier.height(8.dp))
-                    detectedNames.forEach { name ->
+                    detectedRows.forEach { row ->
                         TextButton(
                             onClick = {
-                                employeeName = name
+                                employeeName = row.label
+                                selectedRowY = row.centerY
                                 showEmployeeDialog = false
                                 pendingUri?.let { readImage(it) }
                             },
                             modifier = Modifier.fillMaxWidth()
-                        ) { Text(name, modifier = Modifier.fillMaxWidth()) }
+                        ) { Text(row.label, modifier = Modifier.fillMaxWidth()) }
                     }
                 }
             },
