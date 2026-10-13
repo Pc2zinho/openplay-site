@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.time.LocalTime
@@ -71,6 +72,7 @@ fun ImportScreen(
     var detectedRows by remember { mutableStateOf<List<EmployeeRowCandidate>>(emptyList()) }
     var selectedRowY by remember { mutableStateOf<Int?>(null) }
     var showEmployeeDialog by remember { mutableStateOf(false) }
+    var pendingOcr by remember { mutableStateOf<Text?>(null) }
 
     fun processText(text: String) {
         rawText = text
@@ -100,6 +102,7 @@ fun ImportScreen(
                     detectedRows = detectEmployeeRows(result)
                     if (detectedRows.isNotEmpty()) {
                         pendingUri = uri
+                        pendingOcr = result
                         showEmployeeDialog = true
                         status = "Escolha sua linha para importar somente a sua escala."
                         recognizer.close()
@@ -291,7 +294,17 @@ fun ImportScreen(
                                 employeeName = row.label
                                 selectedRowY = row.centerY
                                 showEmployeeDialog = false
-                                pendingUri?.let { readImage(it) }
+                                val sameOcr = pendingOcr
+                                if (sameOcr != null) {
+                                    parsed = parseScheduleOcrByRow(sameOcr, row.centerY)
+                                    status = if (parsed.isEmpty()) {
+                                        "Encontrei sua linha, mas não consegui montar os dias. Tente digitar seu nome ou use outra foto."
+                                    } else {
+                                        parsed.size.toString() + " dias identificados. Confira antes de salvar."
+                                    }
+                                } else {
+                                    pendingUri?.let { readImage(it) }
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(row.label, modifier = Modifier.fillMaxWidth()) }
