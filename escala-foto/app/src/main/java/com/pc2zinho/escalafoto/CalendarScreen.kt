@@ -263,8 +263,6 @@ private fun removeEscalaFotoEventsFromDeviceCalendar(context: android.content.Co
     else "Nenhum plantão criado pelo Escala Foto foi encontrado neste mês."
 }
 
-@Composable
-private fun CalendarExportDialogsPlaceholder() {}
 
 private fun exportWorkShiftsToDeviceCalendar(context: android.content.Context, shifts: List<Shift>, replace: Boolean): String {
     val work = shifts.filter { !it.dayOff && it.start != null && it.end != null }.sortedBy { it.date }
