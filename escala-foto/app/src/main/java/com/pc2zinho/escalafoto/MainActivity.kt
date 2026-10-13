@@ -35,8 +35,8 @@ private val TextPrimary = Color(0xFFF3F7F5)
 
 enum class AppScreen(val label: String, val icon: ImageVector) {
     HOME("Início", Icons.Filled.Home),
-    CALENDAR("Calendário", Icons.Filled.CalendarMonth),
-    IMPORT("Importar", Icons.Filled.AddAPhoto),
+    CALENDAR("Agenda", Icons.Filled.CalendarMonth),
+    IMPORT("Foto", Icons.Filled.AddAPhoto),
     EARNINGS("Ganhos", Icons.Filled.Payments),
     SETTINGS("Perfil", Icons.Filled.Settings)
 }
