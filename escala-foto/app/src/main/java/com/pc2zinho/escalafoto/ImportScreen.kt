@@ -51,6 +51,8 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun ImportScreen(
@@ -65,6 +67,9 @@ fun ImportScreen(
     var isReading by remember { mutableStateOf(false) }
     var parsed by remember { mutableStateOf<List<Shift>>(emptyList()) }
     var editingIndex by remember { mutableIntStateOf(-1) }
+    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+    var detectedNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showEmployeeDialog by remember { mutableStateOf(false) }
 
     fun processText(text: String) {
         rawText = text
@@ -90,6 +95,16 @@ fun ImportScreen(
             .addOnSuccessListener { result ->
                 isReading = false
                 rawText = result.text
+                if (employeeName.isBlank()) {
+                    detectedNames = detectEmployeeNames(result.text)
+                    if (detectedNames.isNotEmpty()) {
+                        pendingUri = uri
+                        showEmployeeDialog = true
+                        status = "Escolha seu nome para importar somente a sua linha."
+                        recognizer.close()
+                        return@addOnSuccessListener
+                    }
+                }
                 parsed = parseScheduleOcr(result, employeeName)
                 status = if (parsed.isEmpty()) {
                     if (employeeName.isBlank()) "Texto lido. Informe exatamente seu nome na escala e escolha a imagem novamente."
@@ -129,7 +144,7 @@ fun ImportScreen(
             value = employeeName,
             onValueChange = { employeeName = it },
             label = { Text("Seu nome na escala (opcional)") },
-            supportingText = { Text("Ajuda quando a imagem tem vários funcionários.") },
+            supportingText = { Text("Pode deixar vazio: tentaremos encontrar os nomes na foto.") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -219,7 +234,7 @@ fun ImportScreen(
                     ) {
                         Column {
                             Text(
-                                shift.date.toString(),
+                                formatDateBr(shift.date),
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -250,23 +265,6 @@ fun ImportScreen(
             }
         }
 
-        if (rawText.isNotBlank()) {
-            Spacer(Modifier.height(22.dp))
-            Text("Texto reconhecido", fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F171B))
-            ) {
-                Text(
-                    rawText,
-                    modifier = Modifier.padding(14.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
         if (selectedUri != null) {
             Spacer(Modifier.height(12.dp))
             Text(
@@ -275,6 +273,34 @@ fun ImportScreen(
                 fontSize = 12.sp
             )
         }
+    }
+
+
+    if (showEmployeeDialog && detectedNames.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showEmployeeDialog = false },
+            title = { Text("Quem é você nesta escala?") },
+            text = {
+                Column {
+                    Text("Encontramos estes nomes. Toque no seu:")
+                    Spacer(Modifier.height(8.dp))
+                    detectedNames.forEach { name ->
+                        TextButton(
+                            onClick = {
+                                employeeName = name
+                                showEmployeeDialog = false
+                                pendingUri?.let { readImage(it) }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(name, modifier = Modifier.fillMaxWidth()) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showEmployeeDialog = false }) { Text("Digitar manualmente") }
+            }
+        )
     }
 
     if (editingIndex >= 0 && editingIndex < parsed.size) {
@@ -358,4 +384,30 @@ private fun normalizeTime(value: String): String {
     }
     if (trimmed.matches(Regex("""\d{1,2}"""))) return trimmed.padStart(2, '0') + ":00"
     return trimmed
+}
+
+
+private fun formatDateBr(date: java.time.LocalDate): String {
+    val formatter = DateTimeFormatter.ofPattern("dd/MM (EEE)", Locale("pt", "BR"))
+    return date.format(formatter).replace(".", "")
+}
+
+private fun detectEmployeeNames(text: String): List<String> {
+    val ignored = setOf(
+        "FUNCIONÁRIO", "FUNCIONARIO", "HOSPITAL", "VIDA MAIS", "LEGENDA", "PERÍODO", "PERIODO",
+        "ESCALA DE TRABALHO", "UNIDADE", "ENFERMAGEM", "OBSERVAÇÕES", "OBSERVACOES",
+        "FOLGA", "TER", "QUA", "QUI", "SEX", "SÁB", "SAB", "DOM", "SEG"
+    )
+    return text.lineSequence()
+        .map { it.trim() }
+        .filter { line ->
+            line.length in 5..40 &&
+            line.matches(Regex("""[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){1,3}""")) &&
+            ignored.none { line.uppercase(Locale.ROOT).contains(it) } &&
+            !line.contains("Turno", true) && !line.contains("Recursos", true) &&
+            !line.contains("Intervalo", true)
+        }
+        .distinct()
+        .take(12)
+        .toList()
 }
