@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -70,6 +71,8 @@ fun CalendarScreen(
     var exportMessage by remember { mutableStateOf<String?>(null) }
     var showReplaceDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf(false) }
+    var yearView by remember { mutableStateOf(false) }
+    var year by remember { mutableStateOf(YearMonth.now().year) }
     fun exportMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }, replace = false) }
     fun replaceMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }, replace = true) }
     fun removeMonth() { exportMessage = removeEscalaFotoEventsFromDeviceCalendar(context, month) }
@@ -108,7 +111,40 @@ fun CalendarScreen(
         }
 
         Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            OutlinedButton(onClick = { yearView = false }) { Text("MÊS", fontSize = 11.sp) }
+            Spacer(Modifier.padding(horizontal = 4.dp))
+            OutlinedButton(onClick = { yearView = true; year = month.year }) { Text("ANO", fontSize = 11.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
 
+        if (yearView) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = { year-- }) { Icon(Icons.Filled.ChevronLeft, contentDescription = "Ano anterior") }
+                Text("Escala $year", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                IconButton(onClick = { year++ }) { Icon(Icons.Filled.ChevronRight, contentDescription = "Próximo ano") }
+            }
+            LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items((1..12).toList()) { m ->
+                    val ym = YearMonth.of(year, m)
+                    val ms = shifts.filter { YearMonth.from(it.date) == ym }
+                    Card(modifier = Modifier.fillMaxWidth().clickable { month = ym; yearView = false }, shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF111A1F))) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(ym.format(DateTimeFormatter.ofPattern("MMMM", Locale("pt","BR"))).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Spacer(Modifier.height(6.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                repeat(7) { d ->
+                                    val sample = ms.firstOrNull { it.date.dayOfMonth == d + 1 }
+                                    Box(Modifier.weight(1f).height(7.dp).background(when { sample?.dayOff == true -> Color(0xFF18CFE3); sample != null -> Color(0xFF16A765); else -> Color(0xFF273238) }, RoundedCornerShape(4.dp)))
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(ms.count { !it.dayOff }.toString()+" plantões • "+ms.count { it.dayOff }+" folgas", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else {
         Row(Modifier.fillMaxWidth()) {
             listOf("SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM").forEach {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -188,8 +224,10 @@ fun CalendarScreen(
             }
         }
 
+        }
+
         val monthShifts = shifts.filter { YearMonth.from(it.date) == month }
-        if (monthShifts.isNotEmpty()) {
+        if (!yearView && monthShifts.isNotEmpty()) {
             Button(
                 onClick = {
                     val readOk = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
