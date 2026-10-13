@@ -96,11 +96,11 @@ fun ImportScreen(
                 isReading = false
                 rawText = result.text
                 if (employeeName.isBlank()) {
-                    detectedNames = detectEmployeeNames(result.text)
+                    detectedNames = detectEmployeeCandidates(result).ifEmpty { detectEmployeeNames(result.text) }
                     if (detectedNames.isNotEmpty()) {
                         pendingUri = uri
                         showEmployeeDialog = true
-                        status = "Escolha seu nome para importar somente a sua linha."
+                        status = "Escolha sua linha para importar somente a sua escala."
                         recognizer.close()
                         return@addOnSuccessListener
                     }
@@ -282,7 +282,7 @@ fun ImportScreen(
             title = { Text("Quem é você nesta escala?") },
             text = {
                 Column {
-                    Text("Encontramos estes nomes. Toque no seu:")
+                    Text("Encontramos estas linhas de funcionários. Toque na sua. Se o nome saiu estranho no OCR, escolha pela posição/texto mais parecido:")
                     Spacer(Modifier.height(8.dp))
                     detectedNames.forEach { name ->
                         TextButton(
