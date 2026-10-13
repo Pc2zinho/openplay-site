@@ -70,6 +70,55 @@ fun detectEmployeeCandidates(result: Text): List<String> {
     }.distinctBy { normalize(it) }.take(20)
 }
 
+data class EmployeeRowCandidate(val label: String, val centerY: Int)
+
+fun detectEmployeeRows(result: Text): List<EmployeeRowCandidate> {
+    val cells = extractOcrCells(result)
+    if (cells.isEmpty()) return emptyList()
+    val shiftCells = cells.filter { timeRangeRegex.containsMatchIn(it.text) || offWordRegex.containsMatchIn(it.text) }
+    if (shiftCells.isEmpty()) return emptyList()
+    val minShiftX = shiftCells.minOf { it.box.centerX() }
+    val typicalHeight = shiftCells.map { it.box.height().coerceAtLeast(1) }.sorted().let { it[it.size / 2] }
+    val tolerance = (typicalHeight * 1.2).toInt().coerceAtLeast(18)
+    val centers = shiftCells.map { it.box.centerY() }.sorted().fold(mutableListOf<Int>()) { acc, y ->
+        if (acc.isEmpty() || kotlin.math.abs(acc.last() - y) > tolerance) acc.add(y)
+        else acc[acc.lastIndex] = (acc.last() + y) / 2
+        acc
+    }
+    val ignored = setOf("FUNCIONARIO","HOSPITAL","VIDA MAIS","LEGENDA","PERIODO","ESCALA DE TRABALHO","UNIDADE","ENFERMAGEM","OBSERVACOES","FOLGA","TURNO","RECURSOS HUMANOS","INTERVALO","SEG","TER","QUA","QUI","SEX","SAB","DOM")
+    return centers.mapNotNull { center ->
+        val label = cells.filter { it.box.centerX() < minShiftX && kotlin.math.abs(it.box.centerY() - center) <= tolerance && it.text.any(Char::isLetter) }
+            .sortedBy { it.box.left }.joinToString(" ") { it.text.trim() }.replace(Regex("""\\s+"""), " ").trim()
+        val n = normalize(label)
+        if (n.length in 2..50 && ignored.none { n.contains(it) }) EmployeeRowCandidate(label, center) else null
+    }.distinctBy { normalize(it.label) }.take(20)
+}
+
+fun parseScheduleOcrByRow(result: Text, rowCenterY: Int): List<Shift> {
+    val cells = extractOcrCells(result)
+    val period = detectPeriod(result.text) ?: return emptyList()
+    val rowHeight = cells.filter { kotlin.math.abs(it.box.centerY() - rowCenterY) < 60 }
+        .map { it.box.height().coerceAtLeast(1) }.sorted().let { if (it.isEmpty()) 18 else it[it.size / 2] }
+    val tolerance = (rowHeight * 1.35).toInt().coerceAtLeast(22)
+    val row = cells.filter { kotlin.math.abs(it.box.centerY() - rowCenterY) <= tolerance }.sortedBy { it.box.centerX() }
+    val tokens = mutableListOf<Pair<Int, ShiftToken>>()
+    row.forEach { cell ->
+        if (offWordRegex.containsMatchIn(cell.text)) tokens += cell.box.centerX() to ShiftToken(null, null, true)
+        timeRangeRegex.findAll(cell.text).forEach { m -> tokens += cell.box.centerX() to ShiftToken(parseTime(m.groupValues[1], m.groupValues[2]), parseTime(m.groupValues[3], m.groupValues[4]), false) }
+    }
+    // OCR sometimes splits 07-19 into separate elements; reconstruct ranges from the whole row as a fallback.
+    if (tokens.size < 2) {
+        val joined = row.joinToString(" ") { it.text }
+        timeRangeRegex.findAll(joined).forEachIndexed { index, m ->
+            tokens += (Int.MAX_VALUE / 2 + index) to ShiftToken(parseTime(m.groupValues[1], m.groupValues[2]), parseTime(m.groupValues[3], m.groupValues[4]), false)
+        }
+    }
+    val ordered = tokens.distinctBy { it.first to it.second }.sortedBy { it.first }.map { it.second }
+    val dates = generateSequence(period.first) { it.plusDays(1) }.takeWhile { !it.isAfter(period.second) }.toList()
+    if (ordered.size < 2 || dates.isEmpty()) return emptyList()
+    return dates.zip(ordered).map { (date, token) -> Shift(date=date, start=token.start, end=token.end, dayOff=token.off) }
+}
+
 fun parseScheduleOcr(result: Text, employeeName: String): List<Shift> {
     val cells = extractOcrCells(result)
     val fullText = result.text
