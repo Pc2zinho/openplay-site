@@ -191,7 +191,7 @@ private fun parseUsingColumns(row: List<OcrCell>, columns: List<DateColumn>): Li
 
         val token = parseShiftToken(bucket.joinToString(" ") { it.text })
         if (token != null) {
-            result += Shift(column.date, token.start, token.end, token.off)
+            result += Shift(date = column.date, start = token.start, end = token.end, dayOff = token.off)
         }
     }
 
@@ -226,7 +226,7 @@ private fun parseDirectDatedRow(row: List<OcrCell>, preferredYear: Int?): List<S
         val date = fullDate(match) ?: return@forEach
         val after = joined.substring(match.range.last + 1).take(24)
         parseShiftToken(after)?.let { token ->
-            found += Shift(date, token.start, token.end, token.off)
+            found += Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
         }
     }
 
@@ -237,7 +237,7 @@ private fun parseDirectDatedRow(row: List<OcrCell>, preferredYear: Int?): List<S
             val date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return@forEach
             val after = joined.substring(match.range.last + 1).take(24)
             parseShiftToken(after)?.let { token ->
-                found += Shift(date, token.start, token.end, token.off)
+                found += Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
             }
         }
     }
@@ -322,7 +322,7 @@ fun parseScheduleText(text: String, employeeName: String = "", preferredYear: In
             val dates = datesBetween(period.first, period.second)
             if (tokens.size >= 2) {
                 return dates.zip(tokens).map { (date, token) ->
-                    Shift(date, token.start, token.end, token.off)
+                    Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
                 }
             }
         }
@@ -333,7 +333,7 @@ fun parseScheduleText(text: String, employeeName: String = "", preferredYear: In
         val dateMatch = fullDateRegex.find(line) ?: return@forEach
         val date = fullDate(dateMatch) ?: return@forEach
         val token = parseShiftToken(line.substring(dateMatch.range.last + 1))
-        if (token != null) direct += Shift(date, token.start, token.end, token.off)
+        if (token != null) direct += Shift(date = date, start = token.start, end = token.end, dayOff = token.off)
     }
     if (direct.isNotEmpty()) return direct.distinctBy { it.date }.sortedBy { it.date }
 
