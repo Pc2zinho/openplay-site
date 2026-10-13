@@ -22,6 +22,54 @@ fun extractOcrCells(result: Text): List<OcrCell> =
         }
     }.filter { it.text.isNotBlank() }
 
+
+fun detectEmployeeCandidates(result: Text): List<String> {
+    val cells = extractOcrCells(result)
+    if (cells.isEmpty()) return emptyList()
+
+    val shiftCells = cells.filter { timeRangeRegex.containsMatchIn(it.text) || offWordRegex.containsMatchIn(it.text) }
+    if (shiftCells.isEmpty()) return emptyList()
+
+    val minShiftX = shiftCells.minOf { it.box.centerX() }
+    val topY = shiftCells.minOf { it.box.centerY() }
+    val bottomY = shiftCells.maxOf { it.box.centerY() }
+    val typicalHeight = shiftCells.map { it.box.height().coerceAtLeast(1) }.sorted().let { it[it.size / 2] }
+    val rowTolerance = (typicalHeight * 1.2).toInt().coerceAtLeast(18)
+
+    val left = cells.filter {
+        it.box.centerX() < minShiftX &&
+            it.box.centerY() in (topY - rowTolerance)..(bottomY + rowTolerance) &&
+            it.text.any(Char::isLetter)
+    }
+
+    val rowCenters = shiftCells.map { it.box.centerY() }.sorted().fold(mutableListOf<Int>()) { acc, y ->
+        if (acc.isEmpty() || kotlin.math.abs(acc.last() - y) > rowTolerance) acc.add(y)
+        else acc[acc.lastIndex] = (acc.last() + y) / 2
+        acc
+    }
+
+    val ignored = setOf(
+        "FUNCIONARIO", "HOSPITAL", "VIDA MAIS", "LEGENDA", "PERIODO", "ESCALA DE TRABALHO",
+        "UNIDADE", "ENFERMAGEM", "OBSERVACOES", "FOLGA", "TURNO", "RECURSOS HUMANOS",
+        "INTERVALO", "SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"
+    )
+
+    return rowCenters.mapNotNull { center ->
+        val parts = left.filter { kotlin.math.abs(it.box.centerY() - center) <= rowTolerance }
+            .sortedBy { it.box.left }
+            .map { it.text.trim() }
+            .filter { it.any(Char::isLetter) }
+        val candidate = parts.joinToString(" ").replace(Regex("""\s+"""), " ").trim()
+        val normalized = normalize(candidate)
+        candidate.takeIf {
+            normalized.length in 3..50 &&
+                normalized.count { ch -> ch == ' ' } <= 5 &&
+                ignored.none { bad -> normalized.contains(bad) } &&
+                normalized.any(Char::isLetter)
+        }
+    }.distinctBy { normalize(it) }.take(20)
+}
+
 fun parseScheduleOcr(result: Text, employeeName: String): List<Shift> {
     val cells = extractOcrCells(result)
     val fullText = result.text
