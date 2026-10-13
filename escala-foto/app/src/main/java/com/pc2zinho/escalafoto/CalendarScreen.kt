@@ -23,6 +23,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
+import android.provider.CalendarContract
+import java.time.ZoneId
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +55,7 @@ fun CalendarScreen(
     padding: PaddingValues,
     shifts: List<Shift>
 ) {
+    val context = LocalContext.current
     var month by remember { mutableStateOf(YearMonth.now()) }
     val today = LocalDate.now()
     val firstDay = month.atDay(1)
@@ -109,10 +117,15 @@ fun CalendarScreen(
                 val isToday = date == today
                 val background = when {
                     date == null -> Color.Transparent
-                    isToday -> Color(0xFF1F5D46)
-                    shift?.dayOff == true -> Color(0xFF2B2A20)
-                    shift != null -> Color(0xFF15372C)
+                    shift?.dayOff == true -> Color(0xFF18CFE3)
+                    shift != null -> Color(0xFF16A765)
                     else -> Color(0xFF111A1F)
+                }
+                val dayColor = when {
+                    date == null -> Color.Transparent
+                    shift?.dayOff == true -> Color(0xFF04171A)
+                    shift != null -> Color.White
+                    else -> Color(0xFFF3F7F5)
                 }
 
                 Card(
@@ -128,14 +141,15 @@ fun CalendarScreen(
                     ) {
                         Text(
                             text = date?.dayOfMonth?.toString().orEmpty(),
-                            fontWeight = if (isToday) FontWeight.Black else FontWeight.Medium,
-                            fontSize = 13.sp
+                            fontWeight = FontWeight.Black,
+                            fontSize = 14.sp,
+                            color = dayColor
                         )
                         Spacer(Modifier.height(5.dp))
                         if (shift != null) {
                             Text(
                                 text = if (shift.dayOff) "FOLGA" else shift.start?.toString()?.take(5).orEmpty(),
-                                color = if (shift.dayOff) Color(0xFFFFC857) else MaterialTheme.colorScheme.primary,
+                                color = if (shift.dayOff) Color(0xFF04171A) else Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 8.sp,
                                 maxLines = 1
@@ -143,7 +157,7 @@ fun CalendarScreen(
                             if (!shift.dayOff) {
                                 Text(
                                     text = shift.end?.toString()?.take(5).orEmpty(),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = Color.White,
                                     fontSize = 8.sp,
                                     maxLines = 1
                                 )
@@ -156,6 +170,30 @@ fun CalendarScreen(
 
         val monthShifts = shifts.filter { YearMonth.from(it.date) == month }
         if (monthShifts.isNotEmpty()) {
+            Button(
+                onClick = {
+                    val work = monthShifts.filter { !it.dayOff && it.start != null && it.end != null }
+                    if (work.isNotEmpty()) {
+                        val first = work.first()
+                        val startMillis = first.date.atTime(first.start).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        var endDate = first.date
+                        if (!first.end!!.isAfter(first.start)) endDate = endDate.plusDays(1)
+                        val endMillis = endDate.atTime(first.end).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
+                            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis)
+                            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMillis)
+                            .putExtra(CalendarContract.Events.TITLE, "Plantão")
+                            .putExtra(CalendarContract.Events.DESCRIPTION, "Escala importada pelo Escala Foto")
+                        context.startActivity(intent)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A765))
+            ) {
+                Icon(Icons.Filled.EventAvailable, contentDescription = null)
+                Text("  ADICIONAR PLANTÃO AO CALENDÁRIO DO CELULAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
             Spacer(Modifier.height(10.dp))
             Text(
                 text = monthShifts.count { !it.dayOff }.toString() + " plantões • " +
