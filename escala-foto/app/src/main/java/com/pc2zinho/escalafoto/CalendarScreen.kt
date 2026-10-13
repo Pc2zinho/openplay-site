@@ -25,7 +25,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.ui.platform.LocalContext
 import android.Manifest
 import android.content.ContentValues
@@ -63,7 +68,11 @@ fun CalendarScreen(
     val context = LocalContext.current
     var month by remember { mutableStateOf(YearMonth.now()) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
-    fun exportMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }) }
+    var showReplaceDialog by remember { mutableStateOf(false) }
+    var showRemoveDialog by remember { mutableStateOf(false) }
+    fun exportMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }, replace = false) }
+    fun replaceMonth() { exportMessage = exportWorkShiftsToDeviceCalendar(context, shifts.filter { YearMonth.from(it.date) == month }, replace = true) }
+    fun removeMonth() { exportMessage = removeEscalaFotoEventsFromDeviceCalendar(context, month) }
     val calendarPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.READ_CALENDAR] == true && grants[Manifest.permission.WRITE_CALENDAR] == true) exportMonth()
         else exportMessage = "Permissão do calendário necessária para adicionar todos os plantões."
@@ -195,6 +204,17 @@ fun CalendarScreen(
                 Text("  ADICIONAR TODOS AO CALENDÁRIO DO CELULAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { showReplaceDialog = true }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Sync, contentDescription = null)
+                    Text(" Substituir", fontSize = 10.sp)
+                }
+                OutlinedButton(onClick = { showRemoveDialog = true }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                    Text(" Remover", fontSize = 10.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
             exportMessage?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
             Spacer(Modifier.height(10.dp))
             Text(
@@ -207,10 +227,50 @@ fun CalendarScreen(
     }
 }
 
-private fun exportWorkShiftsToDeviceCalendar(context: android.content.Context, shifts: List<Shift>): String {
+    if (showReplaceDialog) {
+        AlertDialog(
+            onDismissRequest = { showReplaceDialog = false },
+            title = { Text("Substituir plantões?") },
+            text = { Text("Os plantões deste mês criados pelo Escala Foto serão removidos do calendário do celular e a escala atual será adicionada novamente.") },
+            confirmButton = { TextButton(onClick = { showReplaceDialog = false; replaceMonth() }) { Text("Substituir") } },
+            dismissButton = { TextButton(onClick = { showReplaceDialog = false }) { Text("Cancelar") } }
+        )
+    }
+    if (showRemoveDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveDialog = false },
+            title = { Text("Remover do calendário?") },
+            text = { Text("Isso remove somente os eventos deste mês criados pelo Escala Foto. Sua escala continuará salva dentro do aplicativo.") },
+            confirmButton = { TextButton(onClick = { showRemoveDialog = false; removeMonth() }) { Text("Remover") } },
+            dismissButton = { TextButton(onClick = { showRemoveDialog = false }) { Text("Cancelar") } }
+        )
+    }
+}
+
+private fun removeEscalaFotoEventsFromDeviceCalendar(context: android.content.Context, month: YearMonth): String {
+    val resolver = context.contentResolver
+    val zone = ZoneId.systemDefault()
+    val start = month.atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    val end = month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    val selection = CalendarContract.Events.DTSTART + ">=? AND " + CalendarContract.Events.DTSTART + "<? AND " +
+        CalendarContract.Events.DESCRIPTION + " LIKE ?"
+    val removed = resolver.delete(
+        CalendarContract.Events.CONTENT_URI,
+        selection,
+        arrayOf(start.toString(), end.toString(), "ESCALA_FOTO_EVENT%")
+    )
+    return if (removed > 0) removed.toString() + " plantões removidos do calendário do celular."
+    else "Nenhum plantão criado pelo Escala Foto foi encontrado neste mês."
+}
+
+@Composable
+private fun CalendarExportDialogsPlaceholder() {}
+
+private fun exportWorkShiftsToDeviceCalendar(context: android.content.Context, shifts: List<Shift>, replace: Boolean): String {
     val work = shifts.filter { !it.dayOff && it.start != null && it.end != null }.sortedBy { it.date }
     if (work.isEmpty()) return "Nenhum plantão deste mês para exportar."
     val resolver = context.contentResolver
+    if (replace && work.isNotEmpty()) removeEscalaFotoEventsFromDeviceCalendar(context, YearMonth.from(work.first().date))
     val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.IS_PRIMARY, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL)
     val selection = CalendarContract.Calendars.VISIBLE + "=1 AND " + CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL + ">=?"
     val calendarId = resolver.query(CalendarContract.Calendars.CONTENT_URI, projection, selection,
@@ -233,7 +293,7 @@ private fun exportWorkShiftsToDeviceCalendar(context: android.content.Context, s
             val values = ContentValues().apply {
                 put(CalendarContract.Events.CALENDAR_ID, calendarId)
                 put(CalendarContract.Events.TITLE, "Plantão")
-                put(CalendarContract.Events.DESCRIPTION, "Escala importada pelo Escala Foto")
+                put(CalendarContract.Events.DESCRIPTION, "ESCALA_FOTO_EVENT • Escala importada pelo Escala Foto")
                 put(CalendarContract.Events.DTSTART, start)
                 put(CalendarContract.Events.DTEND, end)
                 put(CalendarContract.Events.EVENT_TIMEZONE, zone.id)
