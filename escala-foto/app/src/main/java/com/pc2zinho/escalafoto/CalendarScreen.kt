@@ -124,22 +124,49 @@ fun CalendarScreen(
                 Text("Escala $year", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 IconButton(onClick = { year++ }) { Icon(Icons.Filled.ChevronRight, contentDescription = "Próximo ano") }
             }
-            LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(4.dp))
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                userScrollEnabled = false
+            ) {
                 items((1..12).toList()) { m ->
                     val ym = YearMonth.of(year, m)
-                    val ms = shifts.filter { YearMonth.from(it.date) == ym }
-                    Card(modifier = Modifier.fillMaxWidth().clickable { month = ym; yearView = false }, shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF111A1F))) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(ym.format(DateTimeFormatter.ofPattern("MMMM", Locale("pt","BR"))).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Spacer(Modifier.height(6.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                repeat(7) { d ->
-                                    val sample = ms.firstOrNull { it.date.dayOfMonth == d + 1 }
-                                    Box(Modifier.weight(1f).height(7.dp).background(when { sample?.dayOff == true -> Color(0xFF18CFE3); sample != null -> Color(0xFF16A765); else -> Color(0xFF273238) }, RoundedCornerShape(4.dp)))
+                    val firstOffset = ym.atDay(1).dayOfWeek.value - 1
+                    Card(
+                        modifier = Modifier.fillMaxWidth().aspectRatio(0.88f).clickable { month = ym; yearView = false },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF111A1F))
+                    ) {
+                        Column(Modifier.fillMaxSize().padding(6.dp)) {
+                            Text(
+                                ym.format(DateTimeFormatter.ofPattern("MMM", Locale("pt","BR"))).replace(".", "").uppercase(),
+                                fontWeight = FontWeight.Bold, fontSize = 11.sp
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            repeat(6) { week ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(1.dp)) {
+                                    repeat(7) { dow ->
+                                        val day = week * 7 + dow - firstOffset + 1
+                                        val date = if (day in 1..ym.lengthOfMonth()) ym.atDay(day) else null
+                                        val s = date?.let { d -> shifts.firstOrNull { it.date == d } }
+                                        val bg = when {
+                                            date == null -> Color.Transparent
+                                            s?.dayOff == true -> Color(0xFF18CFE3)
+                                            s != null -> Color(0xFF16A765)
+                                            else -> Color(0xFF273238)
+                                        }
+                                        Box(
+                                            Modifier.weight(1f).aspectRatio(1f).background(bg, RoundedCornerShape(2.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (date != null) Text(day.toString(), fontSize = 5.sp, color = if (s?.dayOff == true) Color(0xFF04171A) else Color.White)
+                                        }
+                                    }
                                 }
                             }
-                            Spacer(Modifier.height(6.dp))
-                            Text(ms.count { !it.dayOff }.toString()+" plantões • "+ms.count { it.dayOff }+" folgas", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
