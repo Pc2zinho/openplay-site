@@ -16,6 +16,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,7 +43,7 @@ fun EarningsScreen(
 ) {
     var hourlyRateText by remember { mutableStateOf("15,00") }
     val hourlyRate = hourlyRateText.replace(",", ".").toDoubleOrNull() ?: 0.0
-    val month = YearMonth.now()
+    var month by remember { mutableStateOf(YearMonth.now()) }
     val monthShifts = shifts.filter { YearMonth.from(it.date) == month && !it.dayOff }
     val totalHours = monthShifts.sumOf { it.durationHours() }
     val estimate = totalHours * hourlyRate
@@ -53,10 +58,20 @@ fun EarningsScreen(
             .padding(horizontal = 18.dp, vertical = 16.dp)
     ) {
         Text("Ganhos", fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text(
-            "Uma estimativa simples baseada nas horas da sua escala.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text("Resumo financeiro da sua escala.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            OutlinedButton(onClick = { month = month.minusMonths(1) }) {
+                Icon(Icons.Filled.ChevronLeft, contentDescription = "Mês anterior")
+            }
+            Column {
+                Text(monthName, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+            OutlinedButton(onClick = { month = month.plusMonths(1) }) {
+                Icon(Icons.Filled.ChevronRight, contentDescription = "Próximo mês")
+            }
+        }
 
         Spacer(Modifier.height(18.dp))
 
@@ -107,6 +122,11 @@ fun EarningsScreen(
                 value = monthShifts.size.toString()
             )
         }
+
+        Spacer(Modifier.height(14.dp))
+
+        val offCount = shifts.count { YearMonth.from(it.date) == month && it.dayOff }
+        EarningsStat(modifier = Modifier.fillMaxWidth(), title = "Folgas identificadas", value = offCount.toString())
 
         Spacer(Modifier.height(18.dp))
 
