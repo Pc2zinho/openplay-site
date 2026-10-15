@@ -129,19 +129,35 @@ fun CalendarScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                userScrollEnabled = false
+                userScrollEnabled = true
             ) {
                 items((1..12).toList()) { m ->
                     val ym = YearMonth.of(year, m)
                     val firstOffset = ym.atDay(1).dayOfWeek.value - 1
                     Column(
-                        modifier = Modifier.fillMaxWidth().aspectRatio(0.86f).clickable { month = ym; yearView = false }.padding(2.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(138.dp)
+                            .clickable { month = ym; yearView = false }
+                            .padding(horizontal = 2.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            ym.format(DateTimeFormatter.ofPattern("MMM", Locale("pt","BR"))).replace(".", "").replaceFirstChar { it.uppercase() },
-                            fontWeight = FontWeight.Bold, fontSize = 13.sp
+                            ym.format(DateTimeFormatter.ofPattern("MMM", Locale("pt","BR")))
+                                .replace(".", "")
+                                .replaceFirstChar { it.uppercase() },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color.White
                         )
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(3.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            listOf("S","T","Q","Q","S","S","D").forEach { wd ->
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                    Text(wd, fontSize = 6.sp, color = Color(0xFF7F8C89))
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(1.dp))
                         repeat(6) { week ->
                             Row(Modifier.fillMaxWidth()) {
                                 repeat(7) { dow ->
@@ -156,14 +172,27 @@ fun CalendarScreen(
                                     val fg = when {
                                         shift?.dayOff == true -> Color(0xFF04171A)
                                         shift != null -> Color.White
-                                        date != null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        date != null -> Color(0xFFE7EFEC)
                                         else -> Color.Transparent
                                     }
                                     Box(
-                                        Modifier.weight(1f).aspectRatio(1f).padding(0.5.dp).background(bg, RoundedCornerShape(50)),
+                                        Modifier
+                                            .weight(1f)
+                                            .height(14.dp)
+                                            .padding(0.5.dp)
+                                            .background(bg, RoundedCornerShape(50)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        if (date != null) Text(day.toString(), fontSize = 7.sp, fontWeight = if (shift != null) FontWeight.Bold else FontWeight.Normal, color = fg)
+                                        if (date != null) {
+                                            Text(
+                                                text = day.toString(),
+                                                fontSize = 8.sp,
+                                                lineHeight = 8.sp,
+                                                fontWeight = if (shift != null) FontWeight.Bold else FontWeight.Medium,
+                                                color = fg,
+                                                maxLines = 1
+                                            )
+                                        }
                                     }
                                 }
                             }
